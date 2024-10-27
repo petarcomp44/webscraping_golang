@@ -1,0 +1,40 @@
+=== Web Analyzer Total Report ===
+
+Time Started: 2024-10-26 17:21:52
+
+Total Iterations: 1
+Total URLs Processed: 48000
+Total Data Downloaded: 190.99 MB
+Average Processing Speed: 2729.37 URLs/minute
+
+=== Status Code Summary (All Iterations) ===
+HTTP -3 (Unknown): 41589 (86.64%)
+HTTP 200 (Success): 5805 (12.09%)
+HTTP 400 (Client Error): 14 (0.03%)
+HTTP 401 (Client Error): 15 (0.03%)
+HTTP 402 (Client Error): 20 (0.04%)
+HTTP 403 (Client Error): 136 (0.28%)
+HTTP 404 (Client Error): 365 (0.76%)
+HTTP 406 (Client Error): 1 (0.00%)
+HTTP 421 (Client Error): 1 (0.00%)
+HTTP 500 (Server Error): 17 (0.04%)
+HTTP 502 (Server Error): 1 (0.00%)
+HTTP 503 (Server Error): 22 (0.05%)
+HTTP 520 (Server Error): 2 (0.00%)
+HTTP 521 (Server Error): 1 (0.00%)
+HTTP 522 (Server Error): 2 (0.00%)
+HTTP 523 (Server Error): 1 (0.00%)
+HTTP 525 (Server Error): 1 (0.00%)
+HTTP 530 (Server Error): 3 (0.01%)
+HTTP 563 (Server Error): 2 (0.00%)
+HTTP 604 (Unknown): 2 (0.00%)
+
+=== Tag Analysis Summary ===
+Square: 2 hits (100.0% success rate)
+Wix_All: 115 hits (56.5% success rate)
+Shopify: 53 hits (50.9% success rate)
+WordPress: 139 hits (97.1% success rate)
+Site123: 2 hits (100.0% success rate)
+GoDaddy: 18 hits (100.0% success rate)
+Squarespace: 170 hits (88.8% success rate)
+Wix_Bubble: 27 hits (100.0% success rate)

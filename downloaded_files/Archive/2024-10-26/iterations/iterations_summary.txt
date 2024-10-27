@@ -1,0 +1,35 @@
+=== Iterations Summary Report ===
+
+=== Iteration 1 ===
+Status Code Distribution:
+  HTTP -3: 41589 (86.64%)
+  HTTP 200: 5805 (12.09%)
+  HTTP 400: 14 (0.03%)
+  HTTP 401: 15 (0.03%)
+  HTTP 402: 20 (0.04%)
+  HTTP 403: 136 (0.28%)
+  HTTP 404: 365 (0.76%)
+  HTTP 406: 1 (0.00%)
+  HTTP 421: 1 (0.00%)
+  HTTP 500: 17 (0.04%)
+  HTTP 502: 1 (0.00%)
+  HTTP 503: 22 (0.05%)
+  HTTP 520: 2 (0.00%)
+  HTTP 521: 1 (0.00%)
+  HTTP 522: 2 (0.00%)
+  HTTP 523: 1 (0.00%)
+  HTTP 525: 1 (0.00%)
+  HTTP 530: 3 (0.01%)
+  HTTP 563: 2 (0.00%)
+  HTTP 604: 2 (0.00%)
+
+Tags Found:
+  Square: 2 hits (100.0% success rate)
+  Site123: 2 hits (100.0% success rate)
+  Wix_All: 115 hits (56.5% success rate)
+  Shopify: 53 hits (50.9% success rate)
+  GoDaddy: 18 hits (100.0% success rate)
+  Squarespace: 170 hits (88.8% success rate)
+  WordPress: 139 hits (97.1% success rate)
+  Wix_Bubble: 27 hits (100.0% success rate)
+
