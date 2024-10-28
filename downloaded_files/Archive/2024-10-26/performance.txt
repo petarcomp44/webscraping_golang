@@ -1,4 +1,0 @@
-=== Performance Report ===
-
-Average Speed: 2729.22 URLs/minute
-Peak Speed: 2731.96 URLs/minute

@@ -1283,14 +1283,6 @@ func createClient(timeout time.Duration, proxyURL string) (*http.Client, error) 
 }
 func downloadURLWithRetry(client *http.Client, urlStr string, retries int, am *ArchiveManager, cm *CacheManager) DownloadResult {
 	cachePath := cm.GetCacheFilePath(urlStr, "cache")
-	requestTimeout := 20 * time.Second
-
-	clientWithTimeout := &http.Client{
-		Timeout: requestTimeout,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
 
 	if content, err := os.ReadFile(cachePath); err == nil {
 		parts := bytes.SplitN(content, []byte("\n"), 2)
@@ -1330,10 +1322,7 @@ func downloadURLWithRetry(client *http.Client, urlStr string, retries int, am *A
 			result.RetryCount++
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-		defer cancel()
-
-		downloadResult := downloadURL(ctx, clientWithTimeout, urlStr, am, cm)
+		downloadResult := downloadURL(client, urlStr, am, cm)
 		result = downloadResult
 
 		if result.StatusCode == 200 && len(result.Content) > 0 {
@@ -1355,50 +1344,27 @@ func downloadURLWithRetry(client *http.Client, urlStr string, retries int, am *A
 			}
 		}
 
-		if result.ErrorMessage == "" || (!isNetworkError(result.ErrorMessage) && result.StatusCode != 429 && result.StatusCode != 520 && result.StatusCode != 530) {
+		if result.ErrorMessage == "" ||
+			(!isNetworkError(result.ErrorMessage) &&
+				result.StatusCode != 429 &&
+				result.StatusCode != 520 &&
+				result.StatusCode != 530) {
 			break
 		}
 	}
 
-	if isNetworkError(result.ErrorMessage) || result.StatusCode == 429 || result.StatusCode == 520 || result.StatusCode == 530 || result.StatusCode == 503 {
+	if isNetworkError(result.ErrorMessage) ||
+		result.StatusCode == 429 ||
+		result.StatusCode == 520 ||
+		result.StatusCode == 530 ||
+		result.StatusCode == 503 {
 		appendToFile(networkErrorFile, urlStr)
 	}
 
 	return result
 }
 
-// downloadURLWithTimeout initiates a request with the provided context timeout.
-func downloadURLWithTimeout(ctx context.Context, client *http.Client, urlStr string, am *ArchiveManager, cm *CacheManager) DownloadResult {
-	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
-	if err != nil {
-		return DownloadResult{URL: urlStr, ErrorMessage: err.Error()}
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return DownloadResult{URL: urlStr, ErrorMessage: err.Error()}
-	}
-	defer resp.Body.Close()
-
-	content, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return DownloadResult{URL: urlStr, StatusCode: resp.StatusCode, ErrorMessage: err.Error()}
-	}
-
-	tags := am.ProcessContent(content)
-
-	return DownloadResult{
-		URL:        urlStr,
-		StatusCode: resp.StatusCode,
-		Size:       int64(len(content)),
-		Content:    content,
-		Tags:       tags,
-		Timestamp:  time.Now(),
-	}
-}
-
-func downloadURL(ctx context.Context, client *http.Client, urlStr string, am *ArchiveManager, cm *CacheManager) DownloadResult {
-
+func downloadURL(client *http.Client, urlStr string, am *ArchiveManager, cm *CacheManager) DownloadResult {
 	normalizedURL := normalizeURL(urlStr)
 	parsedURL, err := url.Parse(normalizedURL)
 	if err != nil {
@@ -1409,10 +1375,8 @@ func downloadURL(ctx context.Context, client *http.Client, urlStr string, am *Ar
 			Timestamp:    time.Now(),
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", normalizedURL, nil)
+	req, err := http.NewRequest("GET", normalizedURL, nil)
 	if err != nil {
 		return DownloadResult{
 			URL:          urlStr,
