@@ -8,17 +8,19 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"time"
 )
 
 var totalSuccess int
 var total_3 int
 var total_503 int
 var totalUrls int
+var startTime time.Time
 
 func splitFile(inputFile string, outputDir string, urlsPerFile int) error {
 
-	totalUrls := 0
-	
+	totalUrls = 0
+
 	err := os.MkdirAll(outputDir, os.ModePerm)
 	if err != nil {
 		return fmt.Errorf("failed to create output directory: %v", err)
@@ -61,7 +63,7 @@ func splitFile(inputFile string, outputDir string, urlsPerFile int) error {
 		if err != nil {
 			return fmt.Errorf("failed to write to output file: %v", err)
 		}
-		totalUrls ++
+		totalUrls++
 		urlCounter++
 
 		if urlCounter == urlsPerFile {
@@ -88,14 +90,19 @@ func splitFile(inputFile string, outputDir string, urlsPerFile int) error {
 	fmt.Println("-------------------- Successfully Finished Preparing. --------------------")
 	return nil
 }
+func formatDuration(d time.Duration) string {
+	// Format duration in HH:MM:SS
+	return fmt.Sprintf("%02d:%02d:%02d", int(d.Hours()), int(d.Minutes())%60, int(d.Seconds())%60)
+}
 
 func stripAnsiCodes(input string) string {
 	ansiEscape := regexp.MustCompile(`\x1B\[[0-9;]*[a-zA-Z]`)
 	return ansiEscape.ReplaceAllString(input, "")
 }
 
-func executeGoProgram(outputFile string, idx number) (int, error) {
-	fmt.Printf("Processing %d step.\n", idx)
+func executeGoProgram(outputFile string, idx int) (int, error) {
+	fmt.Printf("Processing step %d .\n", idx)
+	fmt.Printf("\n - - - - - - - - - - - - - - - - - - - - - - - - \n")
 
 	cmdArgs := []string{"run", "source.go", "-input", outputFile, "-threads", "2000", "-proxy", "http://user-spmnrwxyie-country-us:Fe7zDAf1Hxrkoj8_3m@isp.smartproxy.com:10000", "-timeout", "20s", "-max-retries", "2", "-iterations", "1", "-batch-size", "22000"}
 	cmd := exec.Command("go", cmdArgs...)
@@ -119,11 +126,14 @@ func executeGoProgram(outputFile string, idx number) (int, error) {
 	speedRegex := regexp.MustCompile(`Speed: (\d+) URLs/m`)
 	negativeThreeRegex := regexp.MustCompile(`-3: (\d+)`)
 	forbiddenRegex := regexp.MustCompile(`503: (\d+)`)
+	progressRegex := regexp.MustCompile(`Progress: (\d+)/(\d+)`)
 
 	for scanner.Scan() {
 		line := scanner.Text()
 
 		cleanLine := stripAnsiCodes(line)
+
+		elapsedTime := time.Since(startTime)
 		// fmt.Printf("%s", cleanLine)
 		matches := statusRegex.FindStringSubmatch(cleanLine)
 		if len(matches) > 1 {
@@ -163,7 +173,7 @@ func executeGoProgram(outputFile string, idx number) (int, error) {
 				fmt.Printf("Error converting current progress: %v\n", err)
 				continue
 			}
-			totalProgress, err := strconv.Atoi(progressMatches[2])
+			// totalProgress, err := strconv.Atoi(progressMatches[2])
 			if err != nil {
 				fmt.Printf("Error converting total progress: %v\n", err)
 				continue
@@ -171,7 +181,6 @@ func executeGoProgram(outputFile string, idx number) (int, error) {
 			finalProcess = currentProgress
 			// progressTotal = totalProgress
 		}
-	}
 
 		// Check for Speed
 		matchesSpeed := speedRegex.FindStringSubmatch(cleanLine)
@@ -182,7 +191,7 @@ func executeGoProgram(outputFile string, idx number) (int, error) {
 				continue
 			}
 			// fmt.Printf("\r+-------------------------------------------------------------------------------------------------------------------+\n")
-			fmt.Printf("\r200 statuses: %d | Speed: %d URLs/m | -3: %d | 503: %d | Progress: %d / %d", totalSuccess+finalSuccess, speed, total_3+final_3, total_503+final_503, finalProcess+(22000*idx), totalUrls)
+			fmt.Printf("\rSpeed: %d URLs/m | Progress: %d / %d | 200 : %d | -3: %d | 503: %d | ElapsedTime: %s", speed, finalProcess+(22000*(idx-1)), totalUrls, totalSuccess+finalSuccess, total_3+final_3, total_503+final_503, formatDuration(elapsedTime))
 			// fmt.Printf("\r+-------------------------------------------------------------------------------------------------------------------+\n")
 		}
 
@@ -201,6 +210,8 @@ func main() {
 	outputDir := "output_files"
 	urlsPerFile := 22000
 
+	startTime = time.Now()
+
 	// Split the file into multiple smaller files
 	err := splitFile(inputFile, outputDir, urlsPerFile)
 	if err != nil {
@@ -214,7 +225,7 @@ func main() {
 			return err
 		}
 		if !info.IsDir() && filepath.Ext(filePath) == ".txt" {
-			idx ++
+			idx++
 			totalSuccess, err := executeGoProgram(filePath, idx)
 			if err != nil {
 				fmt.Printf("Error during file processing: %v\n", err)
@@ -222,7 +233,9 @@ func main() {
 			}
 			_ = totalSuccess
 			// Display the result of the program execution
-			fmt.Printf("\nResult for file %s:\n%s\n", filePath, totalSuccess)
+			// fmt.Printf("\nResult for file %s:\n%s\n", filePath, totalSuccess)
+			fmt.Printf("\n - - - - - - - - - - - - - - - - - - - - - - - - \n")
+
 		}
 		return nil
 	})
