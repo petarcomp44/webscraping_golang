@@ -1,0 +1,1 @@
+go run main.go -input urls.txt -threads 2000 -proxy http://user-spmnrwxyie-country-us:Fe7zDAf1Hxrkoj8_3m@isp.smartproxy.com:10000 -timeout 20s -max-retries 2 -iterations 1  -batch-size 22000

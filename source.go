@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,13 @@ const (
 	retryDelay           = 5 * time.Second
 	maxRetriesFor429     = 8
 )
+
+type HTTPStatus struct {
+	Code        int
+	Description string
+	Count       int
+	Percentage  float64
+}
 
 var (
 	userAgents = []string{
@@ -561,10 +569,14 @@ func NewArchiveManager(outputDir string, totalIterations int) (*ArchiveManager, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to load tag patterns: %v", err)
 	}
+	stats, err := NewArchiveStats(totalIterations, 0, outputDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create archive stats: %v", err)
+	}
 
 	return &ArchiveManager{
 		basePath:    outputDir,
-		stats:       NewArchiveStats(totalIterations, 0),
+		stats:       stats,
 		matcher:     matcher,
 		tagPatterns: tagMap,
 		fileWriter:  NewFileWriter(outputDir),
@@ -636,14 +648,13 @@ func (am *ArchiveManager) PeriodicSave() error {
 func (am *ArchiveManager) Finalize() error {
 	am.stats.mu.Lock()
 	defer am.stats.mu.Unlock()
-
 	now := time.Now()
 	am.stats.TimeEnded = &now
 	return am.stats.WriteArchiveReports(am.basePath)
 }
 
-func NewArchiveStats(totalIterations, initialURLCount int) *ArchiveStats {
-	return &ArchiveStats{
+func NewArchiveStats(totalIterations, initialURLCount int, path string) (*ArchiveStats, error) {
+	stats := &ArchiveStats{
 		TimeStarted:         time.Now(),
 		CurrentBatchStarted: time.Now(),
 		IterationStats:      make(map[int]*IterationStat),
@@ -654,6 +665,84 @@ func NewArchiveStats(totalIterations, initialURLCount int) *ArchiveStats {
 		URLsByStatus:        make(map[int][]string),
 		URLsByTag:           make(map[string][]string),
 	}
+	date := time.Now().Format("2006-01-02")
+	archivePath := filepath.Join(path, "Archive", date, "total_report.txt")
+	if archivePath != "" {
+		fmt.Println(archivePath)
+		file, err := os.Open(archivePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open report file: %v", err)
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		// var currentSection string
+		fmt.Println("Test point 1")
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+
+			if line == "" {
+				continue // Skip empty lines
+			}
+
+			switch {
+			case strings.HasPrefix(line, "Time Started:"):
+				timeStartedStr := strings.TrimPrefix(line, "Time Started: ")
+				stats.TimeStarted, _ = time.Parse("2006-01-02 15:04:05", timeStartedStr)
+
+			case strings.HasPrefix(line, "Total URLs Processed:"):
+				totalProcessedStr := strings.TrimPrefix(line, "Total URLs Processed: ")
+				stats.TotalProcessed, _ = strconv.ParseInt(totalProcessedStr, 10, 64)
+			case strings.HasPrefix(line, "Total Size:"):
+				// Parse total size
+				totalSizeStr := strings.TrimPrefix(line, "Total Data Downloaded: ")
+				totalSizeStr = strings.TrimSuffix(totalSizeStr, " MB") // Remove MB suffix
+				size, _ := strconv.ParseFloat(totalSizeStr, 64)
+				stats.TotalSize = int64(size * 1024 * 1024) // Convert to bytes
+			case strings.HasPrefix(line, "HTTP"):
+
+				parts := strings.Fields(line)
+				if len(parts) < 4 {
+					continue // Skip if the line doesn't have enough parts
+				}
+				codeStr := strings.TrimPrefix(parts[1], "HTTP ") //
+				code, _ := strconv.Atoi(codeStr)
+				count, _ := strconv.ParseInt(parts[3], 10, 64)
+				stats.StatusCodes.Store(code, count) // Store the count of this status code
+
+			case strings.Contains(line, "hits"):
+				// Parse tag analysis summary
+				parts := strings.Split(line, ":")
+				if len(parts) < 2 {
+					continue // Skip if format is unexpected
+				}
+				tagName := strings.TrimSpace(parts[0])
+				hitsData := strings.Split(parts[1], " hits")
+				if len(hitsData) < 2 {
+					continue // Skip if format is unexpected
+				}
+				hitsStr := strings.TrimSpace(hitsData[0])
+				hits, err := strconv.ParseInt(hitsStr, 10, 64)
+				if err != nil {
+					continue // Skip if the hit count isn't valid
+				}
+
+				// Store the tag count in the stats
+				if val, ok := stats.TagCounts.Load(tagName); ok {
+					stats.TagCounts.Store(tagName, val.(int64)+hits)
+				} else {
+					stats.TagCounts.Store(tagName, hits)
+				}
+
+			}
+
+		}
+		if err := scanner.Err(); err != nil {
+			return nil, fmt.Errorf("failed to read report file: %v", err)
+		}
+	}
+
+	return stats, nil
 }
 
 func (s *ArchiveStats) Reset(result DownloadResult, fileWriter *FileWriter) {
@@ -821,71 +910,55 @@ func processIteration(ctx context.Context, iteration int, config Config, client 
 			return nil
 		default:
 			log.Info().Msgf("Starting batch %d/%d (%d URLs)", batchNum+1, len(batches), len(batch))
+
 			display.SetBatch(batchNum + 1)
 
-			cm.CleanAll()
+			urlChan := make(chan string)
+			resultChan := make(chan DownloadResult)
 
-			// am.stats.Reset()
-			time.Sleep(2 * time.Second)
-
-			urlChan := make(chan string, len(batch))
-			resultChan := make(chan DownloadResult, len(batch))
 			var wg sync.WaitGroup
-
 			for i := 0; i < config.NumThreads; i++ {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
 					for url := range urlChan {
-						select {
-						case <-ctx.Done():
-							return
-						default:
-							result := downloadURLWithRetry(client, url, config.MaxRetries, am, cm)
-							resultChan <- result
-							display.Increment()
-							display.UpdateStatus(result.StatusCode)
+						result := downloadURLWithRetry(client, url, config.MaxRetries, am, cm)
+						resultChan <- result
+						display.Increment()
 
-							if len(result.Tags) > 0 {
-								display.UpdateTagStats(result.Tags)
-							}
-							displayProgress(am.stats, display)
+						display.UpdateStatus(result.StatusCode)
+
+						if len(result.Tags) > 0 {
+							display.UpdateTagStats(result.Tags)
 						}
+
+						displayProgress(am.stats, display)
 					}
 				}()
 			}
 
 			go func() {
 				for _, url := range batch {
-					select {
-					case urlChan <- url:
-					case <-ctx.Done():
-						close(urlChan)
-						return
-					}
+					urlChan <- url
 				}
 				close(urlChan)
+				wg.Wait()
+				close(resultChan)
 			}()
 
 			processedURLs := make(map[string]bool)
-			go func() {
-				for result := range resultChan {
-					if !processedURLs[result.URL] {
-						processedURLs[result.URL] = true
-						am.stats.Update(result, am.fileWriter)
-					}
+			for result := range resultChan {
+				if !processedURLs[result.URL] {
+					processedURLs[result.URL] = true
+					am.stats.Update(result, am.fileWriter)
 				}
-			}()
+			}
 
-			wg.Wait()
-			close(resultChan)
-
-			cm.CleanAll()
 			time.Sleep(1 * time.Second)
 
-			if err := am.PeriodicSave(); err != nil {
-				log.Warn().Err(err).Msgf("Failed to save progress after batch %d", batchNum+1)
-			}
+			// if err := am.PeriodicSave(); err != nil {
+			// 	log.Warn().Err(err).Msgf("Failed to save progress after batch %d", batchNum+1)
+			// }
 
 			log.Info().Msgf("Completed batch %d/%d", batchNum+1, len(batches))
 		}
@@ -905,29 +978,29 @@ func (s *ArchiveStats) WriteArchiveReports(basePath string) error {
 	date := time.Now().Format("2006-01-02")
 	archivePath := filepath.Join(basePath, "Archive", date)
 
-	if err := os.MkdirAll(archivePath, 0755); err != nil {
-		return fmt.Errorf("failed to create archive directory: %v", err)
-	}
+	// if err := os.MkdirAll(archivePath, 0755); err != nil {
+	// 	return fmt.Errorf("failed to create archive directory: %v", err)
+	// }
 
 	if err := s.writeTotalReport(archivePath); err != nil {
 		return err
 	}
 
-	if err := s.writeTagFiles(archivePath); err != nil {
-		return err
-	}
+	// if err := s.writeTagFiles(archivePath); err != nil {
+	// 	return err
+	// }
 
-	if err := s.writeStatusFiles(archivePath); err != nil {
-		return err
-	}
+	// if err := s.writeStatusFiles(archivePath); err != nil {
+	// 	return err
+	// }
 
-	if err := s.writePerformanceReport(archivePath); err != nil {
-		return err
-	}
+	// if err := s.writePerformanceReport(archivePath); err != nil {
+	// 	return err
+	// }
 
-	if err := s.writeIterationReports(archivePath); err != nil {
-		return err
-	}
+	// if err := s.writeIterationReports(archivePath); err != nil {
+	// 	return err
+	// }
 
 	return nil
 }
@@ -1135,6 +1208,7 @@ func (s *ArchiveStats) writeTotalReport(path string) error {
 	fmt.Fprintf(w, "Total URLs Processed: %d\n", atomic.LoadInt64(&s.TotalProcessed))
 	fmt.Fprintf(w, "Total Data Downloaded: %.2f MB\n", float64(atomic.LoadInt64(&s.TotalSize))/1024/1024)
 	fmt.Fprintf(w, "Average Processing Speed: %.2f URLs/minute\n", s.getCurrentSpeed())
+	fmt.Fprintf(w, "Total Processing Speed: %.2f URLS/minutes\n", float64(atomic.LoadInt64(&s.TotalProcessed))/s.TimeEnded.Sub(s.TimeStarted).Minutes())
 
 	fmt.Fprintf(w, "\n=== Status Code Summary (All Iterations) ===\n")
 	var codes []int
@@ -1500,7 +1574,7 @@ func parseFlags() Config {
 	config := Config{}
 
 	flag.StringVar(&config.InputFile, "input", "", "File containing URLs to download")
-	flag.StringVar(&config.OutputDir, "output", "downloaded_files", "Output directory")
+	flag.StringVar(&config.OutputDir, "output", "reports", "Output directory")
 	flag.StringVar(&config.ProxyURL, "proxy", "", "Proxy URL (e.g., http://user:pass@host:port)")
 	flag.IntVar(&config.NumThreads, "threads", defaultMaxConcurrent, "Number of concurrent downloads")
 	flag.DurationVar(&config.Timeout, "timeout", defaultTimeout, "Timeout for each request")

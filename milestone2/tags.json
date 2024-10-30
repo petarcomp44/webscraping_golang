@@ -1,0 +1,10 @@
+{
+    "Shopify": ["cdn.shopify.com", "shopify.com"],
+    "WordPress": ["wp-content", "wp-includes"],
+    "Wix_All": ["wixsite.com", "wix.com", "Wix.com Website Builder"],
+    "Squarespace": ["sqsp.com", "squarespace.com", "<!-- This is Squarespace. -->"],
+    "Site123": ["s123-cdn"],
+    "GoDaddy": ["Go daddy"],
+    "Wix_Bubble": ["renderChatWidget"],
+    "Square": ["content=\"Square Online\">"]
+}

@@ -15,7 +15,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -91,6 +93,13 @@ func NewConsoleDisplay(total int, totalBatches int) *ConsoleDisplay {
 		totalBatches: totalBatches,
 		currentBatch: 1,
 	}
+}
+
+type HTTPStatus struct {
+	Code        int
+	Description string
+	Count       int
+	Percentage  float64
 }
 
 func (cd *ConsoleDisplay) UpdateStatus(statusCode int) {
@@ -637,13 +646,11 @@ func (am *ArchiveManager) Finalize() error {
 	am.stats.mu.Lock()
 	defer am.stats.mu.Unlock()
 
-	now := time.Now()
-	am.stats.TimeEnded = &now
 	return am.stats.WriteArchiveReports(am.basePath)
 }
 
-func NewArchiveStats(totalIterations, initialURLCount int) *ArchiveStats {
-	return &ArchiveStats{
+func NewArchiveStats(totalIterations, initialURLCount int) (*ArchiveStats, error) {
+	stats := &ArchiveStats{
 		TimeStarted:         time.Now(),
 		CurrentBatchStarted: time.Now(),
 		IterationStats:      make(map[int]*IterationStat),
@@ -654,6 +661,60 @@ func NewArchiveStats(totalIterations, initialURLCount int) *ArchiveStats {
 		URLsByStatus:        make(map[int][]string),
 		URLsByTag:           make(map[string][]string),
 	}
+	date := time.Now().Format("2006-01-02")
+	archivePath := filepath.Join("Archive", date)
+	if archivePath != "" {
+		file, err := os.Open("status.txt")
+		if err != nil {
+			return nil, fmt.Errorf("failed to open report file: %v", err)
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		// var currentSection string
+
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+
+			if line == "" {
+				continue // Skip empty lines
+			}
+
+			switch {
+			// case strings.HasPrefix(line, "Time Started:"):
+			// 	timeStartedStr := strings.TrimPrefix(line, "Time Started: ")
+			// 	stats.TimeStarted, _ = time.Parse("2006-01-02 15:04:05", timeStartedStr)
+			// case strings.HasPrefix(line, "Time Ended:"):
+			// 	timeEndedStr := strings.TrimPrefix(line, "Time Ended: ")
+			// 	timeEnded, _ := time.Parse("2006-01-02 15:04:05", timeEndedStr)
+			// 	stats.TimeEnded = &timeEnded
+			// case strings.HasPrefix(line, "Total Processed:"):
+			// 	totalProcessedStr := strings.TrimPrefix(line, "Total URLs Processed: ")
+			// 	stats.TotalProcessed, _ = strconv.ParseInt(totalProcessedStr, 10, 64)
+			// case strings.HasPrefix(line, "Total Size:"):
+			// 	// Parse total size
+			// 	totalSizeStr := strings.TrimPrefix(line, "Total Data Downloaded: ")
+			// 	totalSizeStr = strings.TrimSuffix(totalSizeStr, " MB") // Remove MB suffix
+			// 	size, _ := strconv.ParseFloat(totalSizeStr, 64)
+			// 	stats.TotalSize = int64(size * 1024 * 1024) // Convert to bytes
+			case strings.HasPrefix(line, "HTTP"):
+				// Parse HTTP status codes
+				parts := strings.Fields(line)
+				if len(parts) < 4 {
+					continue // Skip if the line doesn't have enough parts
+				}
+				codeStr := strings.TrimPrefix(parts[1], "HTTP ")
+				code, _ := strconv.Atoi(codeStr)
+				count, _ := strconv.ParseInt(parts[3], 10, 64)
+				stats.StatusCodes.Store(code, count) // Store the count of this status code
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			return nil, fmt.Errorf("failed to read report file: %v", err)
+		}
+	}
+
+	return stats, nil
 }
 
 func (s *ArchiveStats) Reset(result DownloadResult, fileWriter *FileWriter) {
@@ -905,29 +966,29 @@ func (s *ArchiveStats) WriteArchiveReports(basePath string) error {
 	date := time.Now().Format("2006-01-02")
 	archivePath := filepath.Join(basePath, "Archive", date)
 
-	if err := os.MkdirAll(archivePath, 0755); err != nil {
-		return fmt.Errorf("failed to create archive directory: %v", err)
-	}
+	// if err := os.MkdirAll(archivePath, 0755); err != nil {
+	// 	return fmt.Errorf("failed to create archive directory: %v", err)
+	// }
 
 	if err := s.writeTotalReport(archivePath); err != nil {
 		return err
 	}
 
-	if err := s.writeTagFiles(archivePath); err != nil {
-		return err
-	}
+	// if err := s.writeTagFiles(archivePath); err != nil {
+	// 	return err
+	// }
 
-	if err := s.writeStatusFiles(archivePath); err != nil {
-		return err
-	}
+	// if err := s.writeStatusFiles(archivePath); err != nil {
+	// 	return err
+	// }
 
-	if err := s.writePerformanceReport(archivePath); err != nil {
-		return err
-	}
+	// if err := s.writePerformanceReport(archivePath); err != nil {
+	// 	return err
+	// }
 
-	if err := s.writeIterationReports(archivePath); err != nil {
-		return err
-	}
+	// if err := s.writeIterationReports(archivePath); err != nil {
+	// 	return err
+	// }
 
 	return nil
 }
@@ -1115,28 +1176,32 @@ func (s *ArchiveStats) writeIterationReport(path string) error {
 	return nil
 }
 func (s *ArchiveStats) writeTotalReport(path string) error {
-	file, err := os.Create(filepath.Join(path, "total_report.txt"))
+	filePath := filepath.Join(path, "status.txt")
+	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	re := regexp.MustCompile(`HTTP (\d+) \((.*?)\): (\d+) \(([\d.]+)%\)`)
+
+	mp := make(map[int]int)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		matches := re.FindStringSubmatch(line)
+		if len(matches) == 5 {
+			code, _ := strconv.Atoi(matches[1])
+			count, _ := strconv.Atoi(matches[3])
+			mp[code] = count
+		}
+	}
 
 	w := bufio.NewWriter(file)
 	defer w.Flush()
 
-	fmt.Fprintf(w, "=== Web Analyzer Total Report ===\n\n")
-	fmt.Fprintf(w, "Time Started: %s\n", s.TimeStarted.Format("2006-01-02 15:04:05"))
-	if s.TimeEnded != nil {
-		fmt.Fprintf(w, "Time Ended: %s\n", s.TimeEnded.Format("2006-01-02 15:04:05"))
-		fmt.Fprintf(w, "Total Duration: %s\n", s.TimeEnded.Sub(s.TimeStarted))
-	}
+	total := float64(7789099)
 
-	fmt.Fprintf(w, "\nTotal Iterations: %d\n", s.TotalIterations)
-	fmt.Fprintf(w, "Total URLs Processed: %d\n", atomic.LoadInt64(&s.TotalProcessed))
-	fmt.Fprintf(w, "Total Data Downloaded: %.2f MB\n", float64(atomic.LoadInt64(&s.TotalSize))/1024/1024)
-	fmt.Fprintf(w, "Average Processing Speed: %.2f URLs/minute\n", s.getCurrentSpeed())
-
-	fmt.Fprintf(w, "\n=== Status Code Summary (All Iterations) ===\n")
 	var codes []int
 	s.StatusCodes.Range(func(key, value interface{}) bool {
 		codes = append(codes, key.(int))
@@ -1144,7 +1209,6 @@ func (s *ArchiveStats) writeTotalReport(path string) error {
 	})
 	sort.Ints(codes)
 
-	total := float64(atomic.LoadInt64(&s.TotalProcessed))
 	for _, code := range codes {
 		count, _ := s.StatusCodes.Load(code)
 		percentage := float64(count.(int64)) / total * 100
@@ -1162,27 +1226,12 @@ func (s *ArchiveStats) writeTotalReport(path string) error {
 		default:
 			desc = "Unknown"
 		}
+		if existingCount, exists := mp[code]; exists {
+			count = int64(int(count.(int64)) + existingCount) // Update count
+		}
 
 		fmt.Fprintf(w, "HTTP %d (%s): %d (%.2f%%)\n", code, desc, count.(int64), percentage)
 	}
-
-	fmt.Fprintf(w, "\n=== Tag Analysis Summary ===\n")
-	s.TagCounts.Range(func(key, value interface{}) bool {
-		tag := key.(string)
-		count := value.(int64)
-
-		successCount := 0
-		if urls, ok := s.URLsByTag[tag]; ok {
-			for _, u := range urls {
-				if containsURL(s.URLsByStatus[200], u) {
-					successCount++
-				}
-			}
-		}
-		successRate := float64(successCount) / float64(count) * 100
-		fmt.Fprintf(w, "%s: %d hits (%.1f%% success rate)\n", tag, count, successRate)
-		return true
-	})
 
 	return nil
 }
@@ -1510,7 +1559,7 @@ func parseFlags() Config {
 	flag.DurationVar(&config.Timeout, "timeout", defaultTimeout, "Timeout for each request")
 	flag.IntVar(&config.Iterations, "iterations", 1, "Number of iterations")
 	flag.IntVar(&config.MaxRetries, "max-retries", defaultMaxRetries, "Maximum number of retries")
-	flag.IntVar(&config.BatchSize, "batch-size", 1000, "Size of URL batches to process")
+	flag.IntVar(&config.BatchSize, "batch-size", 22000, "Size of URL batches to process")
 
 	flag.StringVar(&config.ProcessorPath, "processor", "", "Path to external processor")
 	flag.IntVar(&config.ProcessorThreads, "pt", 4, "Processor threads")
