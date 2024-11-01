@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -93,8 +94,11 @@ func splitFile(inputFile string, outputDir string, urlsPerFile int) error {
 	writer := bufio.NewWriter(outputFile)
 
 	for scanner.Scan() {
-
-		_, err := writer.WriteString(scanner.Text() + "\n")
+		retext := scanner.Text()
+		if !strings.HasPrefix(retext, "https://") {
+			retext = "https://www." + retext
+		}
+		_, err := writer.WriteString(retext + "\n")
 		if err != nil {
 			return fmt.Errorf("failed to write to output file: %v", err)
 		}
@@ -167,7 +171,7 @@ func executeGoProgram(outputFile string, idx int, config Config) (int, error) {
 	negativeThreeRegex := regexp.MustCompile(`-3: (\d+)`)
 	forbiddenRegex := regexp.MustCompile(`503: (\d+)`)
 	progressRegex := regexp.MustCompile(`Progress: (\d+)/(\d+)`)
-	tagRegex := regexp.MustCompile(`([A-Za-z0-9]+)\s\((\d+)\)`)
+	tagRegex := regexp.MustCompile(`([A-Za-z0-9_]+)\s\((\d+)\)`)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -226,6 +230,7 @@ func executeGoProgram(outputFile string, idx int, config Config) (int, error) {
 		if len(matchesTags) > 1 {
 			for _, match := range matchesTags {
 				tag := match[1]
+
 				count := match[2]
 				countValue, err := strconv.Atoi(count)
 				if err != nil {
@@ -246,7 +251,8 @@ func executeGoProgram(outputFile string, idx int, config Config) (int, error) {
 			}
 			finalSpeed = speed
 			// fmt.Print("\033[2J\033[H")
-			firstLine := fmt.Sprintf("Speed: %d URLs/m | Progress: %d/%d | 200 : %d | -3: %d | 503: %d | ElapsedTime: %s \n", finalSpeed, finalProcess+(config.BatchSize*(idx-1)), totalUrls, totalSuccess+finalSuccess, total_3+final_3, total_503+final_503, formatDuration(elapsedTime))
+
+			firstLine := fmt.Sprintf("Speed: %d URLs/m | Progress: %d/%d | 200 : %d | -3: %d | 503: %d | Time: %s | TotalSpeed: %d UPM \n", finalSpeed, finalProcess+(config.BatchSize*(idx-1)), totalUrls, totalSuccess+finalSuccess, total_3+final_3, total_503+final_503, formatDuration(elapsedTime), int(float64(finalProcess+(config.BatchSize*(idx-1)))/float64(elapsedTime.Minutes())))
 			tag_output := ""
 			for _, tag := range tags {
 				if finalTag[tag]+totalTags[tag] > 1 {
@@ -380,6 +386,7 @@ func main() {
 
 	config := parseFlags()
 	clearAllReports()
+	deleteTempFolder()
 	println(" ******* Cleared everything for best performance.")
 
 	readTags("tags.json")
@@ -388,6 +395,7 @@ func main() {
 	inputFile = config.InputFile
 
 	startTime = time.Now()
+
 	err := splitFile(inputFile, outputDir, urlsPerFile)
 	if err != nil {
 		fmt.Printf("Error during splitting: %v\n", err)
@@ -417,6 +425,39 @@ func main() {
 		fmt.Printf("Error during file processing: %v\n", err)
 		return
 	}
+	// deleteTempFolder()
+	// println(" ******* Started second processing")
+
+	// date := time.Now().Format("2006-01-02")
+	// inputFile = "./reports/Archive/" + date + "/statuses/-3.txt"
+
+	// err = splitFile(inputFile, outputDir, urlsPerFile)
+	// if err != nil {
+	// 	fmt.Printf("Error during splitting: %v\n", err)
+	// 	return
+	// }
+
+	// err = filepath.Walk(outputDir, func(filePath string, info os.FileInfo, err error) error {
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	if !info.IsDir() && filepath.Ext(filePath) == ".txt" {
+	// 		idx++
+	// 		totalSuccess, err := executeGoProgram(filePath, idx, config)
+	// 		if err != nil {
+	// 			fmt.Printf("Error during file processing: %v\n", err)
+	// 			return err
+	// 		}
+	// 		_ = totalSuccess
+	// 		fmt.Printf("\n - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n")
+
+	// 	}
+	// 	return nil
+	// })
+	// if err != nil {
+	// 	fmt.Printf("Error during file processing: %v\n", err)
+	// 	return
+	// }
 	endTime = time.Now()
 
 	deleteTempFolder()

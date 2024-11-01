@@ -1651,8 +1651,8 @@ func read503URLs() ([]string, error) {
 }
 func normalizeURL(urlStr string) string {
 	urlStr = strings.TrimSpace(urlStr)
-	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
-		urlStr = "http://" + urlStr
+	if !strings.HasPrefix(urlStr, "https://") && !strings.HasPrefix(urlStr, "https://") {
+		urlStr = "https://" + urlStr
 	}
 	return urlStr
 }
